@@ -323,13 +323,13 @@ class JsonClient(connection.Connection):
 
         rawline = await asyncio.wait_for(self.r.readline(), timeout=15.0)
         try:
-            line = rawline.decode('ascii')
+            line = rawline.decode('utf-8', errors='replace')
             if line.startswith('PROXY '):
                 proxyLine = line.split(' ')
                 self.source_ip = proxyLine[2]
                 self.source_port = proxyLine[4]
                 rawline = await asyncio.wait_for(self.r.readline(), timeout=15.0)
-                line = rawline.decode('ascii')
+                line = rawline.decode('utf-8', errors='replace')
 
             hs = ujson.loads(line)
         except ValueError as e:
