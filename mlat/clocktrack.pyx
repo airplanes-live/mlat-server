@@ -44,7 +44,6 @@ from libc.math cimport sqrt
 from libc.string cimport memmove
 
 import pygraph.classes.graph
-import pygraph.algorithms.minmax
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
 from scipy.sparse.csgraph import minimum_spanning_tree
@@ -1146,118 +1145,6 @@ cdef _convert_timestamps(g, timestamp_map, predictor_map, node, results, convers
                                 [predictor] + conversion_chain, variance + predictor.variance)
 
 
-@profile.trackcpu
-def normalize(clocktracker, timestamp_map):
-    """
-    Given {receiver: [(timestamp, utc), ...]}
-
-    return [{receiver: (variance, [(timestamp, utc), ...])}, ...]
-    where timestamps are normalized to some arbitrary base timescale within each map;
-    one map is returned per connected subgraph."""
-
-    # Represent the stations as a weighted graph where there
-    # is an edge between S0 and S1 with weight W if we have a
-    # sufficiently recent clock correlation between S0 and S1 with
-    # estimated variance W.
-    #
-    # This graph may have multiple disconnected components. Treat
-    # each separately and do this:
-    #
-    # Find the minimal spanning tree of the component. This will
-    # give us the edges to use to convert between timestamps with
-    # the lowest total error.
-    #
-    # Pick a central node of the MST to use as the the timestamp
-    # basis, where a central node is a node that minimizes the maximum
-    # path cost from the central node to any other node in the spanning
-    # tree.
-    #
-    # Finally, convert all timestamps in the tree to the basis of the
-    # central node.
-
-    # populate initial graph
-    g = pygraph.classes.graph.graph()
-    g.add_nodes(timestamp_map.keys())
-
-    # build a weighted graph where edges represent usable clock
-    # synchronization paths, and the weight of each edge represents
-    # the estimated variance introducted by converting a timestamp
-    # across that clock synchronization.
-
-    # also build a map of predictor objects corresponding to the
-    # edges for later use
-
-    now = time.time()
-
-    predictor_map = {}
-    for si in timestamp_map.keys():
-        for sj in timestamp_map.keys():
-            if si < sj:
-                predictors = _make_predictors(clocktracker.clock_pairs, si, sj, now)
-                if predictors:
-                    predictor_map[(si, sj)] = predictors[0]
-                    predictor_map[(sj, si)] = predictors[1]
-                    g.add_edge((si, sj), wt=predictors[0].variance)
-
-    # find a minimal spanning tree for each component of the graph
-    mst_forest = pygraph.algorithms.minmax.minimal_spanning_tree(g)
-
-    # rebuild the graph with only the spanning edges, retaining weights
-    # also note the roots of each tree as we go
-    g = pygraph.classes.graph.graph()
-    g.add_nodes(mst_forest.keys())
-    roots = []
-    for edge in mst_forest.items():
-        if edge[1] is None:
-            roots.append(edge[0])
-        else:
-            g.add_edge(edge, wt=predictor_map[edge].variance)
-
-    # for each spanning tree, find a central node and convert timestamps
-    resultComponents = []
-    for root in roots:
-        # label heights of nodes, where the height of a node is
-        # the length of the most expensive path to a child of the node
-        heights = {}
-        _label_heights(g, root, heights)
-
-        # Find the longest path in the spanning tree; we want to
-        # resolve starting at the center of this path, as this minimizes
-        # the maximum path length to any node
-
-        # find the two tallest branches leading from the root
-        tall1 = _tallest_branch(g, root, heights)
-        tall2 = _tallest_branch(g, root, heights, ignore=tall1[1])
-
-        # Longest path is TALL1 - ROOT - TALL2
-        # We want to move along the path into TALL1 until the distances to the two
-        # tips of the path are equal length. This is the same as finding a node on
-        # the path within TALL1 with a height of about half the longest path.
-        target = (tall1[0] + tall2[0]) / 2
-        central = root
-        step = tall1[1]
-        while step and abs(heights[central] - target) > abs(heights[step] - target):
-            central = step
-            _, step = _tallest_branch(g, central, heights, ignore=central)
-
-        # Convert timestamps so they are using the clock units of "central"
-        # by walking the spanning tree edges. Then finally convert to wallclock
-        # times as the last step by dividing by the final clock's frequency
-        results = {}
-
-        factor = 1 / central.clock.freq
-        variance = central.clock.jitter**2
-        source_ref = 0
-        target_ref = 0
-        conversion_chain = [_Predictor(target_ref, source_ref, factor, variance)]
-
-        _convert_timestamps(g, timestamp_map, predictor_map, central, results,
-                            conversion_chain, central.clock.jitter**2)
-
-        resultComponents.append(results)
-
-    return resultComponents
-
 class _my_component(object):
     """Simple object for holding a graph component"""
     def __init__(self, label, receivers, size):
@@ -1300,10 +1187,6 @@ def normalize2(clocktracker, timestamp_map):
     receivers = list(timestamp_map.keys())
     receivers.sort() # to get a matrix with only entries above the diagonal when doing si < sj
 
-    # populate initial graph
-    g = pygraph.classes.graph.graph()
-    g.add_nodes(receivers)
-
     # build a weighted graph where edges represent usable clock
     # synchronization paths, and the weight of each edge represents
     # the estimated variance introducted by converting a timestamp
@@ -1330,7 +1213,6 @@ def normalize2(clocktracker, timestamp_map):
                 if predictors:
                     predictor_map[(si, sj)] = predictors[0]
                     predictor_map[(sj, si)] = predictors[1]
-                    g.add_edge((si, sj), wt=predictors[0].variance)
                     predictor_count += 1
                     data.append(predictors[0].variance)
                     row.append(ri)

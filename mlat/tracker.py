@@ -22,7 +22,6 @@ Works out the set of aircraft we want the clients to send traffic for.
 """
 
 import random
-import asyncio
 import time
 from mlat import profile
 from mlat import kalman, config

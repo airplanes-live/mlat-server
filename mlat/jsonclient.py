@@ -384,7 +384,7 @@ class JsonClient(connection.Connection):
                 if lon < -180 or lon > 360:
                     raise ValueError('invalid longitude, should be -180 .. 360')
                 if lon > 180:
-                    lon = lon - 180
+                    lon = lon - 360
 
                 alt = float(hs['alt'])
                 if alt < -1000 or alt > 10000:
@@ -469,9 +469,6 @@ class JsonClient(connection.Connection):
                                          self._udp_key)
 
         self.write_raw(**response)
-        strange = ''
-        if clock_type != 'dump1090' and clock_type != 'radarcape_gps':
-            strange = 'strange clock: '
         self.logger.warning("Handshake successful ({conn_info})".format(conn_info=conn_info))
         self.logger = util.TaggingLogger(glogger, {'tag': '{user}'.format(user=user)})
         return True
@@ -542,7 +539,6 @@ class JsonClient(connection.Connection):
             self._last_message_time = time.time()
 
             linebuf = ''
-            decompression_done = False
             while True:
                 # limit decompression to 64k at a time
                 if packet:

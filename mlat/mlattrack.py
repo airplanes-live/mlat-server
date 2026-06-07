@@ -23,15 +23,12 @@ derive positions.
 """
 
 import ujson
-import asyncio
 import logging
 import operator
 import time
 import numpy
 import math
 from contextlib import closing
-
-import traceback
 
 import modes_cython.message
 from mlat import geodesy, constants, profile
@@ -194,12 +191,10 @@ class MlatTracker(object):
         # find old result, if present
         if ac.last_result_position is None or (group.first_seen - ac.last_result_time) > 120:
             last_result_position = None
-            last_result_var = 1e9
             last_result_dof = 0
             last_result_time = group.first_seen - 120
         else:
             last_result_position = ac.last_result_position
-            last_result_var = ac.last_result_var
             last_result_dof = ac.last_result_dof
             last_result_time = ac.last_result_time
 
@@ -252,8 +247,8 @@ class MlatTracker(object):
         try:
             components = clocktrack.normalize2(clocktracker=self.clock_tracker,
                                              timestamp_map=timestamp_map)
-        except Exception as e:
-            traceback.print_exc()
+        except Exception:
+            glogger.exception("normalize2 failed")
             return
 
         # cluster timestamps into clusters that are probably copies of the
@@ -322,11 +317,6 @@ class MlatTracker(object):
                     continue
 
                 error = int(math.sqrt(abs(var_est)))
-
-                if False and elapsed > 30 and error < 1e9:
-                    lat, lon, alt = geodesy.ecef2llh(ecef)
-                    ecef, ecef_cov = r
-                    glogger.warn('{a:06X} {e:8.1f} {lat:7.3f},{lon:7.3f},{alt:5.0f} '.format(a=decoded.address, e=error/1000, lat=lat, lon=lon, alt=alt) + str([line[0].user for line in cluster]))
 
                 if error > max_error:
                     continue
